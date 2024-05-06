@@ -1,26 +1,39 @@
 //! Process management syscalls
 use crate::{
-    config::MAX_SYSCALL_NUM,
-    task::{exit_current_and_run_next, suspend_current_and_run_next, TaskStatus},
-    timer::get_time_us,
+    config::*, task::{exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, TASK_MANAGER}, timer::{ get_time_ms, get_time_us}
 };
 
+///TimeVal
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
+    /// sec
     pub sec: usize,
+    /// usec
     pub usec: usize,
 }
 
 /// Task information
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 pub struct TaskInfo {
     /// Task status in it's life cycle
-    status: TaskStatus,
+    pub status: TaskStatus,
     /// The numbers of syscall called by task
-    syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
-    time: usize,
+    pub time: usize,
+}
+
+impl TaskInfo {
+    ///taskinfo init
+    pub fn new() -> Self {
+        TaskInfo {
+            status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            time: 0,
+        }
+    }
 }
 
 /// task exits and submit an exit code
@@ -53,5 +66,13 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 /// YOUR JOB: Finish sys_task_info to pass testcases
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info");
-    -1
+    unsafe{
+        let _time =get_time_ms();
+        let inner=TASK_MANAGER.inner.exclusive_access();
+        let now_app=inner.current_task;
+        let mut now_task=inner.tasks[now_app];
+        now_task.task_info.time=_time-now_task.begintime;
+        (*_ti)=now_task.task_info;
+    }
+    0
 }
