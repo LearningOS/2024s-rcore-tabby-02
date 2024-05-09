@@ -68,6 +68,10 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+    /// The task info
+    pub task_info:TaskInfo,
+    /// The task begintime
+    pub begintime:usize,
 }
 
 impl TaskControlBlockInner {
