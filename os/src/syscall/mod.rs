@@ -52,7 +52,7 @@ const SYSCALL_SPAWN: usize = 400;
 const SYSCALL_TASK_INFO: usize = 410;
 
 mod fs;
-mod process;
+pub(crate) mod process;
 
 use fs::*;
 use process::*;
