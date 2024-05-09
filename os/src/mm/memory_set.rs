@@ -51,17 +51,50 @@ impl MemorySet {
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
+    fn check_conflict(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        let start_vpn = start.floor();
+        let end_vpn = end.ceil();
+
+        if let Some(_area) = self.areas.iter().find(|area| {
+            (area.vpn_range.get_start() <= start_vpn && area.vpn_range.get_end() >= end_vpn)
+                || (start_vpn < area.vpn_range.get_start() && end_vpn > area.vpn_range.get_start())
+                || (start_vpn < area.vpn_range.get_end() && end_vpn > area.vpn_range.get_end())
+        }) {
+            true
+        } else {
+            false
+        }
+    }
     /// Assume that no conflicts.
     pub fn insert_framed_area(
         &mut self,
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
-    ) {
+    ) ->isize{
+        if self.check_conflict(start_va, end_va)==true{
+            return -1;
+        }
         self.push(
             MapArea::new(start_va, end_va, MapType::Framed, permission),
             None,
         );
+        0
+    }
+    ///  remove the area from the memory set
+    #[allow(unused)]
+    pub fn remove_framed_area(&mut self, start_va: VirtAddr, end_va: VirtAddr) -> isize {
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+        if let Some(area) = self.areas.iter_mut().find(|area| {
+            area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
+        }) {
+            area.unmap(&mut self.page_table);
+            self.areas.retain(|area| area.vpn_range.get_start() != start_vpn);//去除Vec里的相应项
+            return 0;
+        } else {
+            return -1;
+        }
     }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
