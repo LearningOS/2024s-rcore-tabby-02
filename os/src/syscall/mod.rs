@@ -60,7 +60,13 @@ use process::*;
 use crate::fs::Stat;
 
 /// handle syscall exception with `syscall_id` and other arguments
-pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
+pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    if let Some(cur)=current_task(){
+        let mut inner=cur.inner_exclusive_access();
+        inner.task_info.syscall_times[syscall_id]+=1;
+        drop(inner);
+    };
+    
     match syscall_id {
         SYSCALL_OPEN => sys_open(args[1] as *const u8, args[2] as u32),
         SYSCALL_CLOSE => sys_close(args[0]),

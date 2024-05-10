@@ -1,5 +1,5 @@
 //! Process management syscalls
-//!
+use core::mem::size_of;
 use alloc::sync::Arc;
 
 use crate::{
@@ -7,9 +7,8 @@ use crate::{
     fs::{open_file, OpenFlags},
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-    },
+        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus
+    }, timer::{ get_time_ms, get_time_us},
 };
 
 #[repr(C)]
@@ -118,40 +117,90 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+    // trace!("kernel: sys_get_time");
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let us = get_time_us();
+    let mut buffer = translated_byte_buffer(current_user_token(), _ts as *const u8, size_of::<TimeVal>());
+    // Write the seconds and microseconds to the buffer.
+    let time_val_ptr = buffer[0].as_mut_ptr() as *mut TimeVal;
+    unsafe {
+        (*time_val_ptr).sec = us / 1_000_000;
+        (*time_val_ptr).usec = us % 1_000_000;
+    }
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+    // trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+        let _time =get_time_ms();
+        let cur=current_task().unwrap();
+        let mut inner=cur.inner_exclusive_access();
+        inner.task_info.time=_time-inner.begintime;
+        //下面的translate_byte_buffer()第一个参数一定不能和前面的sys_get_time()中的一样调current_user_token(),
+        //因为这里已经获取了inner，而current_user_token会再获取	inner，导致错误
+        let mut buffer = translated_byte_buffer(inner.get_user_token(), _ti as *const u8, size_of::<TaskInfo>());
+        let taskinfo_val_ptr = buffer[0].as_mut_ptr() as *mut TaskInfo;
+        unsafe {
+        (*taskinfo_val_ptr).status=inner.task_info.status;
+        (*taskinfo_val_ptr).syscall_times=inner.task_info.syscall_times;
+        (*taskinfo_val_ptr).time=inner.task_info.time;
+        drop(inner);
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    // trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _port & !0x7 != 0||_port & 0x7 == 0||_start%PAGE_SIZE!=0{
+        return -1
+    }
+    let cur=current_task().unwrap();
+    let mut inner=cur.inner_exclusive_access();
+    // let p=MapPermission::from(0|_port.get_bit(2) as u8|_port.get_bit(1) as u8|_port.get_bit(0) as u8);
+    let mut p = MapPermission::U;
+    p.set(MapPermission::R, _port  as u8 & 0b0001 == 1);
+    p.set(MapPermission::W, _port >> 1 as u8 & 0b0001 == 1);
+    p.set(MapPermission::X, _port >> 2 as u8 & 0b0001 == 1);
+    let sva:VirtAddr=_start.into();
+    if sva.aligned()!=true{
+        return -1;
+    }
+    let e:VirtAddr=(_len+_start).into();
+    let eva:VirtAddr=e.ceil().into();
+    inner.memory_set.insert_framed_area(sva, eva, p)
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+    // trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let cur=current_task().unwrap();
+    let mut inner=cur.inner_exclusive_access();
+    let sva:VirtAddr=_start.into();
+    if sva.aligned() == false {
+        return -1;
+    }
+    let e:VirtAddr=(_len+_start).into();
+    let eva:VirtAddr=e.ceil().into();
+    inner.memory_set.remove_framed_area(sva, eva)
 }
 
 /// change data segment size
@@ -171,7 +220,8 @@ pub fn sys_spawn(_path: *const u8) -> isize {
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let current_task = current_task().unwrap();
+    current_task.spawn(_path)
 }
 
 // YOUR JOB: Set task priority.
@@ -180,5 +230,9 @@ pub fn sys_set_priority(_prio: isize) -> isize {
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _prio<2{return -1;}
+    let cur=current_task().unwrap();
+    let mut inner=cur.inner_exclusive_access();
+    inner.priority=_prio;
+    _prio
 }
