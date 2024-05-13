@@ -57,10 +57,10 @@ pub(crate) mod process;
 use fs::*;
 use process::*;
 
-use crate::fs::Stat;
+use crate::{fs::Stat, task::current_task};
 
 /// handle syscall exception with `syscall_id` and other arguments
-pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
     if let Some(cur)=current_task(){
         let mut inner=cur.inner_exclusive_access();
         inner.task_info.syscall_times[syscall_id]+=1;

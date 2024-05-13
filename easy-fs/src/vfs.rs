@@ -1,3 +1,4 @@
+use crate::BLOCK_SZ;
 use super::{
     block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, DiskInode, DiskInodeType,
     EasyFileSystem, DIRENT_SZ,
@@ -138,6 +139,121 @@ impl Inode {
         )))
         // release efs lock automatically by compiler
     }
+    /// stat
+    pub fn stat(&self) -> (u64, u64, u32, u32) {
+        let dev: u64 = 0;
+        let mode = self.read_disk_inode(|node| node.type_.tans());
+        let nlink = self.read_disk_inode(|node| node.hard_link_count);
+
+        let block_begin = self.fs.lock().inode_area_start_block as usize;
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = BLOCK_SZ / inode_size;
+        let ino = (self.block_id - block_begin) * inodes_per_block + self.block_offset / inode_size;
+
+        (dev, ino as u64, mode, nlink)
+    }
+    /// hard link
+    pub fn link(&self, old_name: &str, new_name: &str) -> isize {
+        if self.find(new_name).is_some() {
+            return -1;
+        }
+        let inode=self.find(old_name).unwrap();
+        let mut fs = self.fs.lock();
+        let id = self.read_disk_inode(|root_inode| self.find_inode_id(old_name, root_inode));
+        // if id.is_none() {
+        //     return -1;
+        // }
+        let id = id.unwrap();
+        let mut hard_link_count=0;
+        inode.modify_disk_inode(|n|{
+            n.hard_link_count+=1;
+            hard_link_count=n.hard_link_count;
+        });
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(new_name, id as u32);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+        block_cache_sync_all();
+        hard_link_count as isize
+    }
+    /// unlink
+    pub fn unlink(&self, name: &str) -> isize {
+        if self.find(name).is_none() {
+            return -1;
+        }
+        let mut fs = self.fs.lock();
+        let mut inode_id: Option<u32> = None;
+        let mut v: Vec<DirEntry> = Vec::new();
+
+        self.read_disk_inode(|root_inode| {
+            let file_count = root_inode.size as usize / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    root_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device),
+                    DIRENT_SZ
+                );
+                if dirent.name() == name {
+                    inode_id = Some(dirent.inode_id());
+                } else {
+                    v.push(dirent);
+                }
+            }
+        });
+
+        self.modify_disk_inode(|root_inode| {
+            let size = root_inode.size;
+            let data_blocks_dealloc = root_inode.clear_size(&self.block_device);
+            assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+            for data_block in data_blocks_dealloc.into_iter() {
+                fs.dealloc_data(data_block);
+            }
+            self.increase_size((v.len() * DIRENT_SZ) as u32, root_inode, &mut fs);
+            for (i, dirent) in v.iter().enumerate() {
+                root_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+            }
+        });
+        if inode_id.is_none() {
+            return -1;
+        }
+        // Get position of old inode.
+        let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id.unwrap());
+
+        // Find target `DiskInode` then modify!
+        let hard_link_count = get_block_cache(block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(block_offset, |n: &mut DiskInode| -> isize {
+                // Decrease `nlink`.
+                n.hard_link_count -= 1;
+                // If `nlink` is zero, free all data_block through `clear_size()`.
+                if n.hard_link_count == 0 {
+                    let size = n.size;
+                    let data_blocks_dealloc = n.clear_size(&self.block_device);
+                    assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+                    for data_block in data_blocks_dealloc.into_iter() {
+                        fs.dealloc_data(data_block);
+                    }
+                    return 0;
+                }
+                n.hard_link_count as isize
+            });
+
+        // Since we may have writed the cached block, we need to flush the cache.
+        block_cache_sync_all();
+        hard_link_count as isize
+    }
+
+
     /// List inodes under current inode
     pub fn ls(&self) -> Vec<String> {
         let _fs = self.fs.lock();

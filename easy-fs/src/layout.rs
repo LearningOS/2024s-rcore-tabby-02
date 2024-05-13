@@ -69,11 +69,20 @@ impl SuperBlock {
 }
 /// Type of a disk inode
 #[derive(PartialEq)]
+#[derive(Clone, Copy)]
 pub enum DiskInodeType {
     File,
     Directory,
 }
 
+impl DiskInodeType {
+    pub fn tans(&self)->u32{
+        match self {
+            DiskInodeType::File=>0o100000,
+            DiskInodeType::Directory=>0o040000,
+        }
+    }
+}
 /// A indirect block
 type IndirectBlock = [u32; BLOCK_SZ / 4];
 /// A data block
@@ -85,7 +94,8 @@ pub struct DiskInode {
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
     pub indirect2: u32,
-    type_: DiskInodeType,
+    pub type_: DiskInodeType,
+    pub hard_link_count:u32,
 }
 
 impl DiskInode {
@@ -97,6 +107,7 @@ impl DiskInode {
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
+        self.hard_link_count=1;
     }
     /// Whether this inode is a directory
     pub fn is_dir(&self) -> bool {

@@ -1,8 +1,8 @@
 //! Types related to task management & Functions for completely changing TCB
-use super::{add_task,  current_user_token, TaskContext};
+use super::{add_task,  TaskContext};
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
-use crate::fs::{File, Stdin, Stdout};
+use crate::fs::{ File,  Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::syscall::process::TaskInfo;
@@ -228,7 +228,7 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     task_info:TaskInfo::new(),
                     begintime:0,
-                    priority:0,
+                    priority:16,
                 })
             },
         });
@@ -245,13 +245,24 @@ impl TaskControlBlock {
     }
 
     ///
-    pub fn spawn(self: &Arc<Self>,_path:*const u8) -> isize {
-        let token = current_user_token();
-        let path = translated_str(token, _path);
-        let task_control_block;
-        if let Some(data) = get_app_data_by_name(path.as_str()) {
-            task_control_block = TaskControlBlock::new(data);
-        }else{return -1;}
+    // pub fn spawn(self: &Arc<Self>,path:&str) -> isize {
+    //     if let Some(inode)=open_file(path, OpenFlags::RDONLY){
+    //         let v = inode.read_all();
+    //         let task_control_block=TaskControlBlock::new(v.as_slice());
+    //         //将子进程TCB的parent字段设置为父进程
+    //         task_control_block.inner_exclusive_access().parent = Some(Arc::downgrade(self));
+    //         let pid = task_control_block.pid.0;
+    //         let task = Arc::new(task_control_block);
+    //         //向父进程TCB的children(Vec)推入子进程
+    //         self.inner_exclusive_access().children.push(task.clone());  
+    //         add_task(task);
+    //         pid as isize
+    //     }else{return -1;}
+    // }
+
+    /// spawn a new process
+    pub fn spawn(self: &Arc<Self>, data: &[u8]) -> isize {
+        let task_control_block = TaskControlBlock::new(data);
         //将子进程TCB的parent字段设置为父进程
         task_control_block.inner_exclusive_access().parent = Some(Arc::downgrade(self));
         let pid = task_control_block.pid.0;
@@ -261,7 +272,6 @@ impl TaskControlBlock {
         add_task(task);
         pid as isize
     }
-
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
