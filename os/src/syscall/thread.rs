@@ -3,7 +3,7 @@ use crate::{
     task::{add_task, current_task, TaskControlBlock},
     trap::{trap_handler, TrapContext},
 };
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec};
 /// thread create syscall
 pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     trace!(
@@ -35,6 +35,15 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     let new_task_res = new_task_inner.res.as_ref().unwrap();
     let new_task_tid = new_task_res.tid;
     let mut process_inner = process.inner_exclusive_access();
+    // get current mutex number
+    let mutex_len = process_inner.mutex_list.len();
+    let sem_len = process_inner.semaphore_list.len();
+    let task_len = process_inner.tasks.len() + 1;
+    // resize mutex/sem for the new thread
+    process_inner.mutex_allocation.resize(task_len, vec![0; mutex_len]);
+    process_inner.mutex_need.resize(task_len, vec![0; mutex_len]);
+    process_inner.sem_allocation.resize(task_len, vec![0; sem_len]);
+    process_inner.sem_need.resize(task_len, vec![0; sem_len]);
     // add new thread to current process
     let tasks = &mut process_inner.tasks;
     while tasks.len() < new_task_tid + 1 {

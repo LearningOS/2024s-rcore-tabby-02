@@ -14,6 +14,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::usize;
 
 /// Process Control Block
 pub struct ProcessControlBlock {
@@ -49,6 +50,20 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// enable_deadlock_detect
+    pub deadlock_detect: bool,
+    /// mutex available
+    pub mutex_available: Vec<usize>,
+    /// mutex allocated
+    pub mutex_allocation: Vec<Vec<usize>>,
+    /// mutex needed
+    pub mutex_need: Vec<Vec<usize>>,
+    /// semaphore available
+    pub sem_available: Vec<usize>,
+    /// semaphore allocated
+    pub sem_allocation: Vec<Vec<usize>>,
+    /// semaphore needed
+    pub sem_need: Vec<Vec<usize>>,
 }
 
 impl ProcessControlBlockInner {
@@ -85,6 +100,74 @@ impl ProcessControlBlockInner {
 }
 
 impl ProcessControlBlock {
+    /// mutex deadlock detect
+    pub fn mutex_deadlock_detect(&self) -> bool {
+        let task_len = self.inner_exclusive_access().tasks.len();
+        let mut finish = vec![false; task_len];
+
+        let mut work = self.inner_exclusive_access().mutex_available.clone();
+        let need = self.inner_exclusive_access().mutex_need.clone();
+        let alloc = self.inner_exclusive_access().mutex_allocation.clone();
+
+        loop {
+            let mut find_one = false;
+            for i in 0..task_len {
+                if finish[i] {
+                    continue;
+                }
+                let able = !need[i].iter().enumerate().any(|(j, &v)| v > work[j]);
+
+                if able {
+                    find_one = true;
+                    finish[i] = true;
+                    work.iter_mut()
+                        .zip(alloc[i].iter())
+                        .for_each(|(w, &a)| *w += a);
+                }
+            }
+            if finish.iter().all(|&v| v) {
+                break;
+            }
+            if !find_one {
+                return true;
+            }
+        }
+        false
+    }
+        ///sem_deadlock_detect
+        pub fn sem_deadlock_detect(&self)->bool{
+            let task_len = self.inner_exclusive_access().tasks.len();
+            let mut finish = vec![false; task_len];
+            let mut work = self.inner_exclusive_access().sem_available.clone();
+            let need = self.inner_exclusive_access().sem_need.clone();
+            let alloc = self.inner_exclusive_access().sem_allocation.clone();
+    
+            loop {
+                let mut find_one = false;
+                for i in 0..task_len {
+                    if finish[i] {
+                        continue;
+                    }
+                    let able = !need[i].iter().enumerate().any(|(j, &v)| v > work[j]);
+    
+                    if able {
+                        find_one = true;
+                        finish[i] = true;
+                        work.iter_mut()
+                            .zip(alloc[i].iter())
+                            .for_each(|(w, &a)| *w += a);
+                    }
+                }
+                if finish.iter().all(|&v| v) {
+                    break;
+                }
+                if !find_one {
+                    return true;//deadlock
+                }
+            }
+            return false;//not deadlock
+        
+        }
     /// inner_exclusive_access
     pub fn inner_exclusive_access(&self) -> RefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
@@ -119,6 +202,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect: false,
+                    mutex_available: Vec::new(),
+                    mutex_allocation: vec![Vec::new(); 1],
+                    mutex_need: vec![Vec::new(); 1],
+                    sem_available: Vec::new(),
+                    sem_allocation: vec![Vec::new(); 1],
+                    sem_need: vec![Vec::new(); 1],
                 })
             },
         });
@@ -245,6 +335,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect: false,
+                    mutex_available: Vec::new(),
+                    mutex_allocation: vec![Vec::new(); 1],
+                    mutex_need: vec![Vec::new(); 1],
+                    sem_available: Vec::new(),
+                    sem_allocation: vec![Vec::new(); 1],
+                    sem_need: vec![Vec::new(); 1],
                 })
             },
         });
